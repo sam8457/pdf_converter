@@ -1,15 +1,15 @@
 #! python3
 
 import re
-from pypdf import PdfReader
 from ebooklib import epub
+from io import BytesIO
+from pypdf import PdfReader # requires pillow for images
 
 INPUT_FILE_NAME = "Influence.pdf"
 OUTPUT_FILE_NAME = "Influence.epub"
 TITLE = "Influence"
 AUTHOR = "Robert B. Cialdini Ph.D"
 BLACKLIST = [
-    #".{0}[1234567890]+.*", # Page numbers and footnotes #Edit: needs to only match first character in line, maybe remove
     "Robert B. Cialdini Ph.D / [1234567890]+", # Author
     "Robert B. Cialdini Ph.D / [ivx]+",
     "[1234567890]+ / Influence", # Title
@@ -20,17 +20,34 @@ CHAPTER_REGEX = [
     "Chapter [1234567890]+"
 ]
 
-# https://pypdf.readthedocs.io/en/stable/user/extract-text.html
 reader = PdfReader(INPUT_FILE_NAME)
 
-# https://docs.sourcefabric.org/projects/ebooklib/en/latest/tutorial.html#creating-epub
-# https://github.com/aerkalov/ebooklib/blob/master/samples/01_basic_create/create.py
+# add metadata
 book = epub.EpubBook()
 book.set_identifier(OUTPUT_FILE_NAME + "_cleaned")
 book.set_title(TITLE)
 book.set_language('en')
 book.add_author(AUTHOR)
-bookSpineList = ['nav']
+bookSpineList = ['cover','nav']
+bookToc = ["Intro.xhtml"]
+
+# add cover image
+cover = reader.pages[0].images[0].data
+book.set_cover("cover.jpg", cover)
+
+# add css
+style = '''
+p{
+    text-indent: 50px;
+    margin: 0;
+}
+'''
+css = epub.EpubItem(
+    uid="style",
+    file_name="style/styles.css",
+    media_type="text/css",
+    content=style)
+book.add_item(css)
 
 # Init first chapter
 chapter = epub.EpubHtml(
@@ -40,16 +57,21 @@ chapter = epub.EpubHtml(
 )
 content = f'<html><body><h1>Intro</h1><p>'
 
-for page in reader.pages:
+for pageNumber, page in enumerate(reader.pages):
 
-    pageLines = page.extract_text().split('\n')
+    pageLines = page.extract_text().split('\n') 
 
     for pattern in CHAPTER_REGEX:
+
         if re.search(pattern, pageLines[0]):
+
+            if re.search(pattern, pageLines[0]).start() > 2:
+                continue
 
             # Add chapter to book
             content += "</body></html>"
             chapter.set_content(content)
+            chapter.add_item(css)
             book.add_item(chapter)
             bookSpineList.append(chapter)
 
@@ -62,7 +84,24 @@ for page in reader.pages:
             )
             content = f'<html><body><h1>{chapterTitle}</h1><p>'
 
-            
+    # add page's images
+    for image in page.images:
+
+        if pageNumber == 0:
+            break
+
+        imgFileName = 'images/pg' + str(pageNumber) + "_" + image.name
+
+        book.add_item(epub.EpubImage(
+            uid='image_1',
+            file_name=imgFileName,
+            media_type='image/gif',
+            content=image.data
+        ))
+
+        content += f"<p><img src={imgFileName}></p>"
+
+    # add page's text
     for line in pageLines:
 
         if line.strip() == "":
@@ -81,8 +120,6 @@ for page in reader.pages:
         firstChar = line[0]
 
         # Skips page numbers and footnotes
-        # Bug: sometimes catches legtimate lines that happen to start with a number
-        # Bug: does not catch multi-line footnotes
         if firstChar.isnumeric():
             #print("Excluding: " + line)
             continue
@@ -90,7 +127,6 @@ for page in reader.pages:
         lastChar = line.strip()[-1]
 
         # Removes words that are broken across lines by hyphens
-        # Bug: Sometimes catches hyphenated compound words that happen to span newlines
         if lastChar == "-":
             content += line.strip()[:-1]
             continue
@@ -114,11 +150,18 @@ for page in reader.pages:
 # Add final chapter to book
 content += "</body></html>"
 chapter.set_content(content)
+chapter.add_item(css)
 book.add_item(chapter)
 bookSpineList.append(chapter)
 
 book.add_item(epub.EpubNcx())
 book.add_item(epub.EpubNav())
+
+book.toc = (
+    epub.Link('toc.xhtml', 'Table of Contents', 'toc'),
+    (epub.Section('Chapters'),
+    (bookSpineList))
+)
 
 book.spine = bookSpineList
 
@@ -126,16 +169,15 @@ epub.write_epub(OUTPUT_FILE_NAME, book, {})
 
 print("Done.")
 
-# Todo: Format pages better (tabs on newlines)
+# High priority:
 
 # Todo: Remove chapter titles being duplicated in paragraph text
-
-# Todo: Extract images
-# https://pypdf.readthedocs.io/en/stable/user/extract-images.html
 
 
 
 # Low priority:
+
+# Format images better
 
 # Bug: legit lines that happen to start with numbers are excluded
     # Could check if value is superscripted
