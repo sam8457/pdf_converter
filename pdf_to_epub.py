@@ -5,20 +5,26 @@ from ebooklib import epub
 from io import BytesIO
 from pypdf import PdfReader # requires pillow for images
 
-INPUT_FILE_NAME = "Influence.pdf"
-OUTPUT_FILE_NAME = "Influence.epub"
-TITLE = "Influence"
-AUTHOR = "Robert B. Cialdini Ph.D"
+INPUT_FILE_NAME = "Problem.pdf"
+OUTPUT_FILE_NAME = "The Problem of Political Authority (Huemer, Michael).epub"
+TITLE = "The Problem of Political Authority"
+AUTHOR = "Michael Huemer"
 BLACKLIST = [
-    "Robert B. Cialdini Ph.D / [1234567890]+", # Author
-    "Robert B. Cialdini Ph.D / [ivx]+",
-    "[1234567890]+ / Influence", # Title
-    "[ivx]+ / Influence",
+    # Author
+    # Title
 ]
+# Regex examples:
+# "Chapter [0-9]+" # captures any number of digits
+# "[0-9](?!.)" # (?![expression]) excludes anything that matches [expression]
 CHAPTER_REGEX = [
-    "INTRODUCTION",
-    "Chapter [1234567890]+"
+    "Preface",
+    "Analytical Contents",
+    "List of Figures",
+    "Part",
+    "[0-9](?!.)"
 ]
+COVER_PAGE_INDEX = 0 # typically should be 0
+CHAPTER_LINE_INDEX = 0 # typically should be 0
 
 reader = PdfReader(INPUT_FILE_NAME)
 
@@ -32,7 +38,7 @@ bookSpineList = ['cover','nav']
 bookToc = ["Intro.xhtml"]
 
 # add cover image
-cover = reader.pages[0].images[0].data
+cover = reader.pages[COVER_PAGE_INDEX].images[0].data
 book.set_cover("cover.jpg", cover)
 
 # add css
@@ -59,24 +65,31 @@ content = f'<html><body><h1>Intro</h1><p>'
 
 for pageNumber, page in enumerate(reader.pages):
 
-    pageLines = page.extract_text().split('\n') 
+    pageLines = page.extract_text().split('\n')
+
+    # remove tabs
+    #for i in range(len(pageLines)):
+    #    pageLines[i] = pageLines[i].replace("\t", " ")
 
     for pattern in CHAPTER_REGEX:
 
-        if re.search(pattern, pageLines[0]):
+        if len(pageLines) < CHAPTER_LINE_INDEX + 1:
+            break
 
-            if re.search(pattern, pageLines[0]).start() > 2:
-                continue
+        match = re.search(pattern, pageLines[CHAPTER_LINE_INDEX])
+
+        if match and match.start() <= 2:
 
             # Add chapter to book
             content += "</body></html>"
             chapter.set_content(content)
+            print(chapter)
             chapter.add_item(css)
             book.add_item(chapter)
             bookSpineList.append(chapter)
 
             # Start a new chapter
-            chapterTitle = pageLines[0]
+            chapterTitle = pageLines[CHAPTER_LINE_INDEX]
             chapter = epub.EpubHtml(
                 title=chapterTitle,
                 file_name=(chapterTitle + ".xhtml"),
@@ -85,24 +98,29 @@ for pageNumber, page in enumerate(reader.pages):
             content = f'<html><body><h1>{chapterTitle}</h1><p>'
 
     # add page's images
-    for image in page.images:
+    try:
+        for image in page.images:
 
-        if pageNumber == 0:
-            break
+            if pageNumber == 0:
+                break
 
-        imgFileName = 'images/pg' + str(pageNumber) + "_" + image.name
+            imgFileName = 'images/pg' + str(pageNumber) + "_" + image.name
 
-        book.add_item(epub.EpubImage(
-            uid='image_1',
-            file_name=imgFileName,
-            media_type='image/gif',
-            content=image.data
-        ))
+            book.add_item(epub.EpubImage(
+                uid='image_1',
+                file_name=imgFileName,
+                media_type='image/gif',
+                content=image.data
+            ))
 
-        content += f"<p><img src={imgFileName}></p>"
+            content += f"<p><img src={imgFileName}></p>"
+    except:
+        print("Image error.")
 
     # add page's text
     for line in pageLines:
+
+        #print(line)
 
         if line.strip() == "":
             content += "<p></p>"
@@ -170,6 +188,8 @@ epub.write_epub(OUTPUT_FILE_NAME, book, {})
 print("Done.")
 
 # High priority:
+
+# Format as functions
 
 # Todo: Remove chapter titles being duplicated in paragraph text
 
